@@ -6,15 +6,19 @@ import tensorflow as tf
 import numpy as np
 import time
 import cv2
+# from models.large import *
 from models.medium import *
+# from models.light import *
+# from models.tiny import *
 
+use_backgroud = False
 
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
   tf.config.experimental.set_memory_growth(gpu, True)
 
-BUFFER_SIZE = 32
+BUFFER_SIZE = 16
 BATCH_SIZE = 4
 IMG_WIDTH = 256
 IMG_HEIGHT = 256
@@ -48,6 +52,7 @@ def random_crop(input_image, real_image):
     return cropped_image[0], cropped_image[1]
 
 
+@tf.function()
 def normalize(input_image, real_image):
     input_image = (input_image / 127.5) - 1
     real_image = (real_image / 127.5) - 1
@@ -103,8 +108,7 @@ def load_image_test(image_file):
 
     return input_image, real_image
 
-PATH = '../../ped1/'
-PATH = 'dataset/32frames/'
+PATH = '../c3d/dataset/32frames_alt2/'
 
 train_dataset = tf.data.Dataset.list_files(PATH+'train/*.txt')
 train_dataset = train_dataset.map(lambda x: tf.py_function(load_train_frames, [x], [tf.float32, tf.float32]), num_parallel_calls=4)
@@ -118,16 +122,16 @@ test_dataset = tf.data.Dataset.list_files(PATH+'test/*.txt')
 test_dataset = test_dataset.map(lambda x: tf.py_function(load_test_frames, [x], [tf.float32, tf.float32]))
 test_dataset = test_dataset.batch(BATCH_SIZE)
 
-
-generator = Generator()
+print('datasets created')
+generator = Generator(with_background=use_backgroud)
 discriminator = Discriminator()
 
 
-generator_optimizer = tf.keras.optimizers.Adam(1e-3, beta_1=0.9, beta_2=0.5)
-discriminator_optimizer = tf.keras.optimizers.Adam(1e-3, beta_1=0.9, beta_2=0.5)
+generator_optimizer = tf.keras.optimizers.Adam(5e-4, beta_1=0.9, beta_2=0.5)
+discriminator_optimizer = tf.keras.optimizers.Adam(5e-4, beta_1=0.9, beta_2=0.5)
 
 
-checkpoint_dir = 'training_checkpoints'
+checkpoint_dir = './training_checkpoints/medium_ped1'
 checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
 
 
@@ -140,15 +144,17 @@ status = checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
 
 
 
-
 def generate_images(model, test_input, tar, step, use_test):
-    prediction = model(test_input, training=True)
+    if use_backgroud:
+        noise_input = tf.random.uniform((test_input.shape[0], 1, 1, 64))
+        prediction = model([test_input, noise_input], training=True)
+    else:
+        prediction = model(test_input, training=True)
 
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     file_name = 'run_epoch_res/out_c{}_{}.mp4'.format(step, use_test)
     writer = cv2.VideoWriter(file_name, fourcc, 2, (512, 512))
 
-    display_list = [test_input[0][0], tar[0][0], prediction[0][0]]
     for inp, t, pred in zip(test_input[0], tar[0], prediction[0]):
         
         inp = (inp+1) * 127.5
@@ -171,12 +177,18 @@ import datetime
 log_dir="logs/"
 
 summary_writer = tf.summary.create_file_writer(
-    log_dir + "fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    log_dir + "fit/light_ped2/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
 
 @tf.function
 def train_step(input_image, target, epoch):
     with tf.GradientTape() as gen_tape, tf.GradientTape() as disc_tape:
-        gen_output = generator(input_image, training=True)
+
+        if use_backgroud:
+            noise_input = tf.random.uniform((input_image.shape[0], 1, 1, 64))
+
+            gen_output = generator([input_image, noise_input], training=True)
+        else:
+            gen_output = generator(input_image, training=True)
 
         disc_real_output = discriminator([input_image, target], training=True)
         disc_generated_output = discriminator([input_image, gen_output], training=True)
@@ -193,7 +205,6 @@ def train_step(input_image, target, epoch):
                                                 generator.trainable_variables))
         discriminator_optimizer.apply_gradients(zip(discriminator_gradients,
                                                     discriminator.trainable_variables))
-
     with summary_writer.as_default():
         tf.summary.scalar('gen_total_loss', gen_total_loss, step=epoch)
         tf.summary.scalar('gen_gan_loss', gen_gan_loss, step=epoch)
@@ -208,14 +219,13 @@ def train_step(input_image, target, epoch):
 def fit(train_ds, test_ds, epochs):
     for epoch in range(epochs):
         start = time.time()
-
+        st = start
         for n, (input_image, target) in train_ds.enumerate():
             print('.', end='')
             if (n+1) % 10 == 0:
                 print('\n')
-
+            st = time.time()
             gen_total_loss, gen_gan_loss, gen_l1_loss, disc_loss = train_step(input_image, target, epoch)
-
             if (n+1) % 10 == 0:
                 print('gen_total_loss', gen_total_loss, epoch)
                 print('gen_gan_loss', gen_gan_loss, epoch)
@@ -223,7 +233,7 @@ def fit(train_ds, test_ds, epochs):
                 print('disc_loss', disc_loss, epoch)
                 print('step', n)
 
-            if (n+1) % 100 == 0:
+            if (n+1) % 300 == 0:
                 filenameprefix = 'train_{}_{}'.format(epoch, n)
                 generate_images(generator, input_image, target, filenameprefix, 0)
                 for input_image, target in test_ds.take(1):
@@ -232,7 +242,7 @@ def fit(train_ds, test_ds, epochs):
         print()
 
         # saving (checkpoint) the model every i epochs
-        if (epoch + 1) % 1 == 0:
+        if (epoch + 1) % 2 == 0:
             checkpoint.save(file_prefix=checkpoint_prefix)
 
         print ('Time taken for epoch {} is {} sec\n'.format(epoch + 1,

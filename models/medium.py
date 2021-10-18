@@ -120,10 +120,26 @@ def background():
     conv_3 = upsample_2d(512, 4, strides=4)(conv_2)
     conv_4 = upsample_2d(256, 4, strides=2)(conv_3)
     conv_4_3d = tf.reshape(conv_4, (-1, 8, 128, 128, 32))
-    conv_5 = upsample_3d(OUTPUT_CHANNELS, 4, strides=2)(conv_4_3d)
-    conv_6 = upsample_3d(1, 4, strides=(2, 1, 1))(conv_5)
+    conv_5 = upsample_3d(3, 4, strides=2)(conv_4_3d)
+    conv_6 = upsample_3d(OUTPUT_CHANNELS, 4, strides=(2, 1, 1))(conv_5)
     out = conv_6
     
+    return tf.keras.Model(inputs=inputs, outputs=out)
+
+
+def background_2d():
+    inputs = tf.keras.layers.Input(shape=[1, 1, 64])
+    conv_1 = upsample_2d(16, 4, strides=2)(inputs)
+    conv_2 = upsample_2d(16, 4, strides=2)(conv_1)
+    conv_3 = upsample_2d(32, 4, strides=2)(conv_2)
+    conv_4 = upsample_2d(32, 4, strides=2)(conv_3)
+    conv_5 = upsample_2d(32, 4, strides=2)(conv_4)
+    conv_6 = upsample_2d(32, 4, strides=2)(conv_5)
+    conv_7 = upsample_2d(16, 4, strides=2)(conv_6)
+    conv_7 = upsample_2d(16, 4, strides=2)(conv_6)
+    conv_8 = upsample_2d(1, 4, strides=2)(conv_7)
+    conv_8 = tf.reshape(conv_8, (-1, 1, 256, 256, 1))
+    out = tf.repeat(conv_8, 32, axis=1)
     return tf.keras.Model(inputs=inputs, outputs=out)
 
 
@@ -138,7 +154,7 @@ def mask():
     result.add(tf.keras.layers.LeakyReLU())
 
     result.add(
-        tf.keras.layers.Conv3D(8, 4, strides=(4, 2, 2), padding='same',
+        tf.keras.layers.Conv3D(16, 4, strides=2, padding='same',
                                 kernel_initializer=initializer, use_bias=True))
 
     result.add(tf.keras.layers.BatchNormalization())
@@ -146,12 +162,14 @@ def mask():
     result.add(tf.keras.layers.LeakyReLU())
     
     result.add(
-        tf.keras.layers.Conv3DTranspose(8, 4, strides=(4, 2, 2), padding='same',
+        tf.keras.layers.Conv3DTranspose(8, 4, strides=2, padding='same',
                                 kernel_initializer=initializer, use_bias=True))
 
     result.add(tf.keras.layers.BatchNormalization())
 
     result.add(tf.keras.layers.LeakyReLU())
+
+    # result.add(tf.keras.layers.Dropout(0.25))
 
     result.add(
         tf.keras.layers.Conv3DTranspose(OUTPUT_CHANNELS, 4, strides=2, padding='same',
@@ -159,31 +177,38 @@ def mask():
 
     result.add(tf.keras.layers.BatchNormalization())
 
-    result.add(tf.keras.layers.Activation('sigmoid'))
+    result.add(tf.keras.layers.Activation('relu'))
 
     return result
 
 
 def Generator(with_background=True):
     inputs = tf.keras.layers.Input(shape=[32, 256, 256, 3])
+    noise = tf.keras.layers.Input(shape=[1, 1, 64])
 
     down_stack = [
         downsample(32, 4, strides=(1, 2, 2), apply_batchnorm=False),  # (bs, 8, 128, 128, 64)
-        downsample(32, 4, strides=(2, 2, 2)),  # (bs, 8, 64, 64, 128)
+        downsample(64, 4, strides=(2, 2, 2)),  # (bs, 8, 64, 64, 128)
         downsample(64, 4, strides=(2, 2, 2)),  # (bs, 8, 64, 64, 128)
         downsample(64, 4, strides=(2, 2, 2)),  # (bs, 4, 32, 32, 256)
-        downsample(128, 4, strides=(2, 2, 2)),  # (bs, 4, 16, 16, 512)
-        downsample(128, 4, strides=(2, 2, 2)),  # (bs, 4, 16, 16, 512)
-        downsample(256, 4, strides=(1, 2, 2)),  # (bs, 4, 16, 16, 512)
+        downsample(64, 4, strides=1),  # (bs, 4, 16, 16, 512)
+        downsample(64, 4, strides=1),  # (bs, 4, 16, 16, 512)
+        downsample(64, 4, strides=1),  # (bs, 4, 16, 16, 512)
+        downsample(64, 4, strides=(2, 2, 2)),  # (bs, 4, 16, 16, 512)
+        downsample(128, 4, strides=(2, 1, 1)),  # (bs, 4, 16, 16, 512)
+        downsample(256, 4, strides=(1, 1, 1)),  # (bs, 4, 16, 16, 512)
     ]
 
     up_stack = [
-        upsample(256, 4, strides=(1, 2, 2), apply_dropout=True),  # (bs, 4,  8, 8, 1024)
-        upsample(128, 4, strides=(2, 2, 2), apply_dropout=True),  # (bs, 4,  8, 8, 1024)
-        upsample(128, 4, strides=(2, 2, 2), apply_dropout=True),  # (bs, 4,  8, 8, 1024)
+        upsample(256, 4, strides=(1, 1, 1), apply_dropout=True),  # (bs, 4,  8, 8, 1024)
+        upsample(128, 4, strides=(2, 1, 1), apply_dropout=True),  # (bs, 4,  8, 8, 1024)
+        upsample(64, 4, strides=(2, 2, 2), apply_dropout=True),  # (bs, 4,  8, 8, 1024)
+        upsample(64, 4, strides=1),  # (bs, 4,  16, 16, 1024)
+        upsample(64, 4, strides=1),  # (bs, 4,  16, 16, 1024)
+        upsample(64, 4, strides=1),  # (bs, 4,  16, 16, 1024)
         upsample(64, 4, strides=(2, 2, 2)),  # (bs, 4,  16, 16, 1024)
         upsample(64, 4, strides=(2, 2, 2)),  # (bs, 4,  16, 16, 1024)
-        upsample(32, 4, strides=(2, 2, 2)),  # (bs, 8, 128, 128, 128)
+        upsample(64, 4, strides=(2, 2, 2)),  # (bs, 8, 128, 128, 128)
         upsample(32, 4, strides=(2, 2, 2)),  # (bs, 8, 128, 128, 128)
     ]
 
@@ -213,13 +238,13 @@ def Generator(with_background=True):
     if not with_background:
         return tf.keras.Model(inputs=inputs, outputs=x)
     
-    bg_input = tf.random.uniform((1, 1, 1, 64))
-    bg = background()(bg_input)
+    # bg_input = tf.random.uniform((1, 1, 1, 64))
+    bg = background_2d()(noise)
     msk = mask()(inputs)
     
     out = bg*(1-msk) + x * msk
 
-    return tf.keras.Model(inputs=inputs, outputs=out)
+    return tf.keras.Model(inputs=[inputs, noise], outputs=out)
 
 
 
@@ -247,9 +272,12 @@ def Discriminator():
     down2 = downsample(32, 4, strides=(2, 2, 2))(down1)  # (bs, 32, 64, 64, 128)
     down3 = downsample(64, 4, strides=(2, 2, 2))(down2)  # (bs, 32, 32, 32, 256)
     down4 = downsample(64, 4, strides=(2, 2, 2))(down3)  # (bs, 32, 32, 32, 256)
-    down5 = downsample(64, 4, strides=(2, 2, 2))(down4)  # (bs, 32, 32, 32, 256)
-    
-    up1 = upsample(64, 4, strides=2)(down5)
+    down5 = downsample(64, 4, strides=(2, 1, 1))(down4)  # (bs, 32, 32, 32, 256)
+    down6 = downsample(128, 4, strides=1)(down5)  # (bs, 32, 32, 32, 256)
+    down7 = downsample(128, 4, strides=1)(down6)  # (bs, 32, 32, 32, 256)
+
+    up1 = upsample(64, 4, strides=(2, 1, 1))(down7)
+    up1 = tf.keras.layers.Dropout(0.5)(up1)
     up2 = upsample(32, 4, strides=(2, 1, 1))(up1)
     up3 = upsample(32, 4, strides=(2, 1, 1))(up2)
     
@@ -258,7 +286,7 @@ def Discriminator():
                                     kernel_initializer=initializer,
                                     use_bias=True)(up3)
         
-    out = tf.keras.activations.sigmoid(up4)
+    out = tf.keras.activations.tanh(up4)
 
     return tf.keras.Model(inputs=[inp, tar], outputs=out)
 

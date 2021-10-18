@@ -3,9 +3,10 @@ import tensorflow as tf
 
 
 OUTPUT_CHANNELS = 1
+LAMBDA = 100
+
 
 def downsample(filters, size, strides=(1, 2, 2), apply_batchnorm=True):
-    # initializer = tf.random_normal_initializer(0., 0.02)
     initializer = tf.initializers.glorot_uniform()
 
     result = tf.keras.Sequential()
@@ -23,7 +24,6 @@ def downsample(filters, size, strides=(1, 2, 2), apply_batchnorm=True):
 
 
 def upsample(filters, size, strides=(1, 2, 2), apply_dropout=False):
-    # initializer = tf.random_normal_initializer(0., 0.02)
     initializer = tf.initializers.glorot_uniform()
 
     result = tf.keras.Sequential()
@@ -120,10 +120,10 @@ def background():
     conv_3 = upsample_2d(512, 4, strides=4)(conv_2)
     conv_4 = upsample_2d(256, 4, strides=2)(conv_3)
     conv_4_3d = tf.reshape(conv_4, (-1, 8, 128, 128, 32))
-    conv_5 = upsample_3d(OUTPUT_CHANNELS, 4, strides=2)(conv_4_3d)
-    # conv_6 = upsample_3d(1, 4, strides=(2, 1, 1))(conv_5)
-    out = conv_5
-    
+    conv_5 = upsample_3d(4, 4, strides=2)(conv_4_3d)
+    conv_6 = upsample_3d(2, 4, strides=(2, 1, 1))(conv_5)
+    conv_7 = upsample_3d(1, 4, strides=(2, 1, 1))(conv_6)
+    out = conv_7
     
     return tf.keras.Model(inputs=inputs, outputs=out)
 
@@ -166,30 +166,26 @@ def mask():
 
 
 def Generator(with_background=True):
-    inputs = tf.keras.layers.Input(shape=[16, 256, 256, 3])
+    inputs = tf.keras.layers.Input(shape=[64, 256, 256, 3])
 
     down_stack = [
         downsample(32, 4, strides=(1, 2, 2), apply_batchnorm=False),  # (bs, 8, 128, 128, 64)
         downsample(32, 4, strides=(2, 2, 2)),  # (bs, 8, 64, 64, 128)
         downsample(64, 4, strides=(2, 2, 2)),  # (bs, 8, 64, 64, 128)
+        downsample(64, 4, strides=(2, 2, 2)),  # (bs, 8, 64, 64, 128)
         downsample(64, 4, strides=(2, 2, 2)),  # (bs, 4, 32, 32, 256)
-        downsample(64, 4, strides=1),  # (bs, 4, 32, 32, 256)
-        downsample(64, 4, strides=1),  # (bs, 4, 32, 32, 256)
-        downsample(64, 4, strides=1),  # (bs, 4, 32, 32, 256)
         downsample(128, 4, strides=(2, 2, 2)),  # (bs, 4, 16, 16, 512)
-        downsample(128, 4, strides=(1, 2, 2)),  # (bs, 4, 16, 16, 512)
+        downsample(128, 4, strides=(2, 2, 2)),  # (bs, 4, 16, 16, 512)
         downsample(256, 4, strides=(1, 2, 2)),  # (bs, 4, 16, 16, 512)
     ]
 
     up_stack = [
         upsample(256, 4, strides=(1, 2, 2), apply_dropout=True),  # (bs, 4,  8, 8, 1024)
-        upsample(128, 4, strides=(1, 2, 2), apply_dropout=True),  # (bs, 4,  8, 8, 1024)
         upsample(128, 4, strides=(2, 2, 2), apply_dropout=True),  # (bs, 4,  8, 8, 1024)
-        upsample(64, 4, strides=1),  # (bs, 4, 32, 32, 256)
-        upsample(64, 4, strides=1),  # (bs, 4, 32, 32, 256)
-        upsample(64, 4, strides=1),  # (bs, 4, 32, 32, 256)
+        upsample(128, 4, strides=(2, 2, 2), apply_dropout=True),  # (bs, 4,  8, 8, 1024)
         upsample(64, 4, strides=(2, 2, 2)),  # (bs, 4,  16, 16, 1024)
         upsample(64, 4, strides=(2, 2, 2)),  # (bs, 4,  16, 16, 1024)
+        upsample(64, 4, strides=(2, 2, 2)),  # (bs, 8, 128, 128, 128)
         upsample(32, 4, strides=(2, 2, 2)),  # (bs, 8, 128, 128, 128)
         upsample(32, 4, strides=(2, 2, 2)),  # (bs, 8, 128, 128, 128)
     ]
@@ -228,15 +224,12 @@ def Generator(with_background=True):
 
     return tf.keras.Model(inputs=inputs, outputs=out)
 
-loss_object = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
-LAMBDA = 100
 
 @tf.function
 def generator_loss(disc_generated_output, gen_output, target):
-    # gan_loss = loss_object(tf.ones_like(disc_generated_output), disc_generated_output)
-    gan_loss = tf.reduce_mean(tf.pow(disc_generated_output - tf.ones_like(disc_generated_output), 2))
 
+    gan_loss = tf.reduce_mean(tf.pow(disc_generated_output - tf.ones_like(disc_generated_output), 2))
     # mean absolute error
     l1_loss = tf.reduce_mean(tf.pow(target - gen_output, 2))
 
@@ -248,22 +241,20 @@ def generator_loss(disc_generated_output, gen_output, target):
 def Discriminator():
     initializer = tf.initializers.glorot_uniform()
 
-    inp = tf.keras.layers.Input(shape=[16, 256, 256, 3], name='input_image')
-    tar = tf.keras.layers.Input(shape=[16, 256, 256, 1], name='target_image')
+    inp = tf.keras.layers.Input(shape=[64, 256, 256, 3], name='input_image')
+    tar = tf.keras.layers.Input(shape=[64, 256, 256, 1], name='target_image')
 
     x = tf.keras.layers.concatenate([inp, tar])  # (bs, 32, 256, 256, channels*2)
 
     down1 = downsample(32, 4, apply_batchnorm=False)(x)  # (bs, 32, 128, 128, 64)
     down2 = downsample(32, 4, strides=(2, 2, 2))(down1)  # (bs, 32, 64, 64, 128)
-    down3 = downsample(32, 4, strides=(2, 2, 2))(down2)  # (bs, 32, 32, 32, 256)
-    down4 = downsample(32, 4, strides=(2, 2, 2))(down3)  # (bs, 32, 32, 32, 256)
-    down5 = downsample(32, 4, strides=(2, 2, 2))(down4)  # (bs, 32, 32, 32, 256)
-    down6 = downsample(64, 4, strides=1)(down5)  # (bs, 32, 32, 32, 256)
-    down7 = downsample(64, 4, strides=1)(down6)  # (bs, 32, 32, 32, 256)
+    down3 = downsample(64, 4, strides=(2, 2, 2))(down2)  # (bs, 32, 32, 32, 256)
+    down4 = downsample(64, 4, strides=(2, 2, 2))(down3)  # (bs, 32, 32, 32, 256)
+    down5 = downsample(64, 4, strides=(2, 2, 2))(down4)  # (bs, 32, 32, 32, 256)
     
-    up1 = upsample(64, 4, strides=2)(down7)
+    up1 = upsample(64, 4, strides=2)(down5)
     up2 = upsample(32, 4, strides=(2, 1, 1))(up1)
-    up3 = upsample(16, 4, strides=(2, 1, 1))(up2)
+    up3 = upsample(32, 4, strides=(2, 1, 1))(up2)
     
     up4 = tf.keras.layers.Conv3DTranspose(1, 4, strides=2,
                                     padding='same',
@@ -277,10 +268,9 @@ def Discriminator():
 
 @tf.function
 def discriminator_loss(disc_real_output, disc_generated_output):
-    # real_loss = loss_object(tf.ones_like(disc_real_output), disc_real_output)
+
     real_loss = tf.reduce_mean(tf.pow(disc_real_output - tf.ones_like(disc_real_output), 2))
 
-    # generated_loss = loss_object(tf.zeros_like(disc_generated_output), disc_generated_output)
     generated_loss = tf.reduce_mean(tf.pow(disc_generated_output, 2))
     
 

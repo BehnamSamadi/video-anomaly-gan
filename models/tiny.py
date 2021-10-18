@@ -166,13 +166,12 @@ def mask():
 
 
 def Generator(with_background=True):
-    inputs = tf.keras.layers.Input(shape=[16, 256, 256, 3])
+    inputs = tf.keras.layers.Input(shape=[8, 256, 256, 3])
 
     down_stack = [
         downsample(32, 4, strides=(1, 2, 2), apply_batchnorm=False),  # (bs, 8, 128, 128, 64)
         downsample(32, 4, strides=(2, 2, 2)),  # (bs, 8, 64, 64, 128)
         downsample(64, 4, strides=(2, 2, 2)),  # (bs, 8, 64, 64, 128)
-        downsample(64, 4, strides=(2, 2, 2)),  # (bs, 4, 32, 32, 256)
         downsample(64, 4, strides=1),  # (bs, 4, 32, 32, 256)
         downsample(64, 4, strides=1),  # (bs, 4, 32, 32, 256)
         downsample(64, 4, strides=1),  # (bs, 4, 32, 32, 256)
@@ -188,7 +187,6 @@ def Generator(with_background=True):
         upsample(64, 4, strides=1),  # (bs, 4, 32, 32, 256)
         upsample(64, 4, strides=1),  # (bs, 4, 32, 32, 256)
         upsample(64, 4, strides=1),  # (bs, 4, 32, 32, 256)
-        upsample(64, 4, strides=(2, 2, 2)),  # (bs, 4,  16, 16, 1024)
         upsample(64, 4, strides=(2, 2, 2)),  # (bs, 4,  16, 16, 1024)
         upsample(32, 4, strides=(2, 2, 2)),  # (bs, 8, 128, 128, 128)
         upsample(32, 4, strides=(2, 2, 2)),  # (bs, 8, 128, 128, 128)
@@ -248,8 +246,8 @@ def generator_loss(disc_generated_output, gen_output, target):
 def Discriminator():
     initializer = tf.initializers.glorot_uniform()
 
-    inp = tf.keras.layers.Input(shape=[16, 256, 256, 3], name='input_image')
-    tar = tf.keras.layers.Input(shape=[16, 256, 256, 1], name='target_image')
+    inp = tf.keras.layers.Input(shape=[8, 256, 256, 3], name='input_image')
+    tar = tf.keras.layers.Input(shape=[8, 256, 256, 1], name='target_image')
 
     x = tf.keras.layers.concatenate([inp, tar])  # (bs, 32, 256, 256, channels*2)
 
@@ -257,7 +255,7 @@ def Discriminator():
     down2 = downsample(32, 4, strides=(2, 2, 2))(down1)  # (bs, 32, 64, 64, 128)
     down3 = downsample(32, 4, strides=(2, 2, 2))(down2)  # (bs, 32, 32, 32, 256)
     down4 = downsample(32, 4, strides=(2, 2, 2))(down3)  # (bs, 32, 32, 32, 256)
-    down5 = downsample(32, 4, strides=(2, 2, 2))(down4)  # (bs, 32, 32, 32, 256)
+    down5 = downsample(32, 4, strides=(1, 2, 2))(down4)  # (bs, 32, 32, 32, 256)
     down6 = downsample(64, 4, strides=1)(down5)  # (bs, 32, 32, 32, 256)
     down7 = downsample(64, 4, strides=1)(down6)  # (bs, 32, 32, 32, 256)
     
